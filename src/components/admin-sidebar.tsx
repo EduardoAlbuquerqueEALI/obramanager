@@ -18,6 +18,7 @@ import {
   MessageSquare,
   HardHat,
   ShieldCheck,
+  Settings,
   LogOut,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
@@ -46,6 +47,7 @@ const navItems = [
   { label: 'FVS', href: '/admin/fvs', icon: ClipboardCheck },
   { label: 'Funcionários', href: '/admin/funcionarios', icon: HardHat },
   { label: 'Treinamentos', href: '/admin/treinamentos', icon: ShieldCheck },
+  { label: 'Configurações', href: '/admin/configuracoes', icon: Settings },
 ]
 
 export default function AdminSidebar({ user }: { user: SidebarUser }) {

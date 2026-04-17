@@ -29,6 +29,43 @@ async function getProfile() {
   return { user, profile, admin }
 }
 
+// ─── Notifica SPELHO quando unidade é concluída via FVS ──────────────────────
+
+async function notifySpelhoUnitCompleted(
+  admin: ReturnType<typeof createAdminClient>,
+  orgId: string,
+  unidadeId: string
+) {
+  const [{ data: mapping }, { data: org }] = await Promise.all([
+    admin
+      .from('external_mappings')
+      .select('external_id')
+      .eq('system', 'spelho')
+      .eq('entity_type', 'unidade')
+      .eq('internal_id', unidadeId)
+      .maybeSingle(),
+    admin
+      .from('organizations')
+      .select('spelho_callback_url, spelho_callback_secret')
+      .eq('id', orgId)
+      .single(),
+  ])
+
+  if (!mapping || !org?.spelho_callback_url || !org?.spelho_callback_secret) return
+
+  await fetch(org.spelho_callback_url, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${org.spelho_callback_secret}`,
+    },
+    body: JSON.stringify({
+      event: 'unit.completed',
+      data: { spelho_unit_id: (mapping as { external_id: string }).external_id },
+    }),
+  }).catch(() => {})
+}
+
 // ─── Criar FVS + auto-gerar cells ────────────────────────────────────────────
 
 export async function criarFVS(formData: unknown): Promise<ActionResult> {
@@ -284,6 +321,38 @@ export async function marcarVerificacao(formData: unknown): Promise<ActionResult
         status: 'pending',
         urgencia: 'alta',
       })
+    }
+  }
+
+  // ─── INTEGRAÇÃO: verificar se unidade foi concluída e notificar SPELHO ──────
+  // O trigger check_fvs_unidade_concluida (migration 0017) automaticamente
+  // marca unidades.status = 'concluida' quando todas as cells FVS são aprovadas.
+  // Aqui verificamos se isso aconteceu e notificamos o SPELHO.
+  if (parsed.data.status === 'aprovado' || parsed.data.status === 'aprovado_reinspecao') {
+    try {
+      const { data: cellInfo } = await ctx.admin
+        .from('verificacao_unidades')
+        .select('unidade_id')
+        .eq('id', parsed.data.cell_id)
+        .single()
+
+      if (cellInfo) {
+        const { data: unidade } = await ctx.admin
+          .from('unidades')
+          .select('id, status')
+          .eq('id', (cellInfo as { unidade_id: string }).unidade_id)
+          .single()
+
+        if ((unidade as { id: string; status: string } | null)?.status === 'concluida') {
+          await notifySpelhoUnitCompleted(
+            ctx.admin,
+            ctx.profile.org_id,
+            (cellInfo as { unidade_id: string }).unidade_id
+          )
+        }
+      }
+    } catch {
+      // notification is non-critical
     }
   }
 
